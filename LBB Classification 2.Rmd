@@ -1,0 +1,435 @@
+---
+title: "Heart Attack Classification"
+author: "Takdir Zulhaq Dessiaming"
+date: "2022-08-29"
+output:
+  html_document:
+    number_sections: true
+    df_print: paged
+    highlight: tango
+    theme: cosmo
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+Pada kesempatan kali ini, kita akan melakukan prediksi klasifikasi pada data serangan jantung, dengan menggunakan pendekatan Naive Bayes, Decision Tree, dan Random Forest.
+
+Data ini diambil dari Kaggle, dan kita dapat melakukan klasifikasi pada data berikut.
+
+About DataSet There are 13 attributes:    
+1. Age: Age (in years)    
+2. Sex: gender (1 = male; 0 = female)    
+3. ChestPain: Chest Pain type   
+    -- 1: typical angina (all criteria present)    
+    -- 2: atypical angina (two of three criteria satisfied)            
+    -- 3: non-anginal pain (less than one criteria satisfied)         
+    -- 4: asymptomatic (none of the criteria are satisfied)    
+4. Restbps: Resting Blood pressure (in mmHg, upon admission to the hospital)     
+5. Chol: serum cholesterol in mg/dL    
+6. Fbs: fasting blood sugar > 120 mg/dL (likely to be diabetic) 1 = true; 0 = false    
+7. RestECG: Resting electrocardiogram results    
+    -- Value 0: normal    
+    -- Value 1: having ST-T wave abnormality (T wave inversions and/or ST elevation or depression of > 0.05 mV)    
+    -- Value 2: showing probable or definite left ventricular hypertrophy by Estes' criteria     
+8. MaxHR: Greatest number of beats per minute your heart can possibly reach during all-out strenuous exercise.     
+9. Exang: exercise induced angina (1 = yes; 0 = no)    
+10. Oldpeak: ST depression induced by exercise relative to rest (in mm, achieved by subtracting the lowest ST segment points during exercise and rest)     
+11. Slope: the slope of the peak exercise ST segment, ST-T abnormalities are considered to be a crucial indicator for identifying presence of ischaemia    
+    -- Value 1: upsloping     
+    -- Value 2: flat     
+    -- Value 3: downsloping    
+12. Ca: number of major vessels (0-3) colored by fluoroscopy. Major cardial vessels are as goes: aorta, superior vena cava, inferior vena cava, pulmonary  artery (oxygen-poor blood --> lungs), pulmonary veins (oxygen-rich blood --> heart), and coronary arteries (supplies blood to heart tissue).     
+13. AHD: 0 = normal; 1 = fixed defect (heart tissue can't absorb thallium both under stress and in rest); 2 = reversible defect (heart tissue is unable to absorb thallium only under the exercise portion of the test)     
+14.AHD: 0 = no disease, 1 = disease   
+
+# Library
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(e1071)
+library(caret)
+library(ROCR)
+library(partykit)
+library(randomForest)
+```
+
+# Read Data
+
+```{r}
+df <- read.csv("Heart Attack Data Set.csv")
+df
+```
+# Data Cleaning
+
+Mari kita lakukan pembersihan data, dengan melakukan penyesuaian tipe data, agar hasil analisis dapat berjalan dengan lancar. Dalam analisis ini pendekatan machine learning, kita akan menggunakan kolom dengan tipe data numerik dan kategorik.
+
+```{r}
+df <- df %>% 
+  # select(-Age) %>% 
+  mutate(
+    sex = as.factor(sex),
+    cp = as.factor(cp),
+    fbs = as.factor(fbs),
+    restecg = as.factor(restecg),
+    exang = as.factor(exang),
+    slope = as.factor(slope),
+    ca = as.factor(ca),
+    thal = as.factor(thal),
+    target = as.factor(target)
+    
+  )
+
+str(df)
+colSums(is.na(df))
+```
+
+```{r}
+prop.table(table(df$target))
+```
+Tipe data sudah sesuai dengan kolom yang ada, dan dilihat dari proporsi datanya, dapat dikatakan cukup seimbang.
+
+# Cross Validation
+
+Mari kita coba melakukan penyeimbangan data dengan melakukan Cross Validation.
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(100)
+# your code here
+
+index <- sample(nrow(df), nrow(df)*0.8)
+
+data_train <- df[index,]
+data_test <- df[-index,]
+```
+```{r}
+prop.table(table(data_train$target))
+```
+Karena tanpa melakukan Cross Validation data lebih seimbang, maka untuk analisis selanjutnya, kita akan menggunakan data awal kita. Tapi mari kita coba untuk melakukan down-sampling dan melihat proporsi datanya.
+
+```{r}
+set.seed(100)
+
+data_train_down <- downSample(x = data_train %>% select(-target), # hanya select variabel predictor
+           y= data_train$target,  # select variabel target
+           yname = "target")
+```
+
+```{r}
+prop.table(table(data_train_down$target))
+```
+Dengan melakukan down-sampling, data yang kita gunakan memiliki proporsi data yang seimbang, yang mana ini sangat baik dalam melakukan pemodelan, khususnya pada data training untuk dilakukan pelatihan.
+
+# Naive Bayes
+
+- Naive Bayes adalah model machine learning yang memanfaatkan Bayes' Theorem dalam melakukan klasifikasi.
+- Hubungan antara prediktor dengan target variabel dianggap saling dependen.
+- Dikatakan "Naive" karena tiap prediktor diasumsikan saling **independent** (tidak berhubungan satu sama lain) dan **memiliki bobot yang sama** (memiliki kepentingan atau pengaruh yang sama) dalam melakukan prediksi. Hal ini untuk memudahkan kalkulasi (rumus menjadi lebih simpel) dan mengurangi beban komputasi.
+
+Model pertama, kita menggunakan metode Naive Bayes.
+
+## Model Fitting
+
+```{r}
+model_naive <- naiveBayes(target~., data_train_down, laplace = 1)
+```
+
+Karena sebelumnya kita telah melakukan data cleaning dan cross validation (splitting data), maka langsung saja kita langsung membuat modelnya.
+
+## Prediction
+
+```{r}
+pred_naive <- predict(model_naive, data_test, type = "class")
+```
+
+Lalu kita melakukan prediksi dengan labelnya berupa class, yaitu berupa factor/kategorik.
+
+## Model Evaluation
+
+```{r}
+confusionMatrix(pred_naive, data_test$target, positive = "1")
+```
+Pada kasus ini, yang manakah error yang kita ingin minimalisir? False Negative / False Positive?
+- False Negative : pasien diprediksi no disease, namun nyatanya dia terkena disease
+- False Positive : pasien diprediksi disease, namun nyatanya dia no disease
+
+Error yang ingin kita kurangi adalah FN/Recall (Sensitivity)
+
+
+## ROC and AUC
+
+Accuracy memiliki kekurangan untuk memperlihatkan kebaikan model dalam mengklasifikasi kedua kelas. Mengatasi kekurangan accuracy tersebut, maka mari menggunakan **ROC** dan **AUC** sebagai alat evaluasi selain Confusion Matrix.
+
+### Receiver-Operating Curve (ROC)
+
+ROC adalah kurva yang menggambarkan hubungan antara True Positive Rate (Sensitivity atau Recall) dengan False Positive Rate (1-Specificity) pada setiap threshold. Model yang baik idealnya memiliki **True Positive Rate yang tinggi dan False Positive Rate yang rendah**. Note: Specificity adalah True Negative Rate.
+
+```{r}
+pred_test_nb <- predict(model_naive, data_test, type="raw")
+
+```
+
+
+```{r}
+# objek prediction
+pred_roc_nb <-  prediction(predictions = pred_test_nb[,"1"], # hanya mengambil peluang salah satu kelas (pada case ini yaitu democrat)
+           labels = data_test$target)
+```
+
+```{r}
+perf <- plot(performance(prediction.obj = pred_roc_nb, # memanggil nilai roc_prediction yang sudah dihitung sebelumnya
+            measure = "tpr", 
+            x.measure = "fpr"))
+abline(0,1, lty=2) # harus dijalankan bersamaan dengan code plot() di atas
+```
+
+
+### Area Under Curve (AUC)
+
+Selanjutnya mari kita mencoba untuk AUCnya.
+
+```{r}
+auc_pred <- performance(prediction.obj = pred_roc_nb,
+            measure = "auc")
+
+auc_pred@y.values # tanda @ untuk mengakases nilai/bagian dari object auc
+
+str(auc_pred)
+```
+AUC = 0.8666667, maka dapat disimpulkan bahwa model kita sudah cukup baik dalam memisahkan kelas 1 dan 0 (disease dan no disease)
+
+- ROC dan AUC sebagai alat evaluasi tambahan selain confusion matrix.
+- ROC menggambarkan True Positive Rate (Recall) vs False Positive Rate. Kurva yang baik adalah kurva yang mendekati pojok kiri atas (Recall = 1, FPR = 0).
+- AUC adalah luas area di bawah kurva ROC. Semakin mendekati nilai 1, model semakin baik dalam memisahkan kelas positif dan negatif.
+
+# Decision Tree
+
+Decision Tree merupakan *tree-based model* yang cukup sederhana dengan performa yang *robust/powerful* untuk prediksi. Decision Tree menghasilkan visualisasi berupa **pohon keputusan** yang *dapat diinterpretasi* dengan mudah.
+
+Karakter tambahan Decision Tree:
+
+- Variable predictor diasumsikan saling dependent, sehingga dapat mengatasi multicollinearity.
+- Dapat mengatasi nilai predictor numerik yang berupa outlier.
+
+## Model Fitting
+
+```{r}
+model_dt <- ctree(formula = target ~.,
+                     data = data_train_down,
+                     control = ctree_control(mincriterion=0.90))
+plot(model_dt, type = "simple")
+```
+## Prediction
+
+```{r}
+# your code here
+pred_dt <- predict(model_dt, data_test, type="response")
+```
+
+## Evaluasi Model Decision Tree
+
+Untuk memeriksa performa model, kita dapat menggunakan `confusionMatrix()`. Pastikan Anda mengatur status pelanggan yang *default* sebagai kelas positif (`positive = "yes"`).  
+
+```{r}
+# your code here
+confusionMatrix(pred_dt, data_test$target, positive = "1")
+```
+
+Pada kasus ini, yang manakah error yang kita ingin minimalisir? False Negative / False Positive?
+- False Negative : pasien diprediksi no disease, namun nyatanya dia terkena disease
+- False Positive : pasien diprediksi disease, namun nyatanya dia no disease
+
+Error yang ingin kita kurangi adalah FN/Recall (Sensitivity)
+
+### Receiver-Operating Curve (ROC)
+
+
+```{r}
+pred_test2 <- predict(model_dt, data_test, type="prob")
+
+```
+
+
+```{r}
+# objek prediction
+pred_roc2 <-  prediction(predictions = pred_test2[,"1"], # hanya mengambil peluang salah satu kelas (pada case ini yaitu democrat)
+           labels = data_test$target)
+```
+
+```{r}
+perf <- plot(performance(prediction.obj = pred_roc2, # memanggil nilai roc_prediction yang sudah dihitung sebelumnya
+            measure = "tpr", 
+            x.measure = "fpr"))
+abline(0,1, lty=2) # harus dijalankan bersamaan dengan code plot() di atas
+```
+
+
+### Area Under Curve (AUC)
+
+Selanjutnya mari kita mencoba untuk AUCnya.
+
+```{r}
+auc_pred <- performance(prediction.obj = pred_roc2,
+            measure = "auc")
+
+auc_pred@y.values # tanda @ untuk mengakases nilai/bagian dari object auc
+
+str(auc_pred)
+```
+
+# Random Forest
+
+Random Forest adalah salah satu jenis Ensemble Method yang terdiri dari **banyak Decision Tree**. Masing-masing Decision Tree memiliki karakteristik masing-masing dan tidak saling berhubungan. Random Forest memanfaatkan konsep **Bagging (Bootstrap and Aggregation)** dalam pembuatannya. Berikut adalah prosesnya:
+
+1. **Bootstrap sampling**: Membuat data dengan random sampling (with replacement) dari data keseluruhan dan mengizinkan adanya baris yang terduplikat.
+2. Dibuat 1 decision tree untuk masing-masing data hasil bootstrap. Digunakan parameter `mtry` untuk memilih banyaknya calon prediktor secara random (**Automatic Feature Selection**)
+3. Melakukan prediksi terhadap observasi yang baru untuk setiap Decision Tree.
+4. **Aggregation**: Menghasilkan satu prediksi tunggal untuk memprediksi.
+  + Kasus klasifikasi: majority voting
+  + Kasus regresi: rata-rata nilai target
+
+Cek proporsi kelas target pada data train yang sudah dilakukan cross validation sebelumnya.
+
+```{r}
+prop.table(table(data_train_down$target))
+```
+```{r}
+data_train_down[data_train_down$target == "1",]
+```
+## Model Fitting
+
+```{r}
+
+ set.seed(100)
+ control <- trainControl(method = "repeatedcv", number = 5, repeats = 3)
+
+ 
+ # pembuatan model random forest
+ model_rf <- train(target ~ .,data_train_down, method = "rf",
+                   trControl = control)
+
+ # simpan model
+ saveRDS(model_rf, "model_rf.RDS")
+```
+
+Salah satu kelemahan Random Forest adalah pembuatan model yang membutuhkan waktu yang cukup lama. Practice yang baik saat selesai melakukan training adalah menyimpan model tersebut ke dalam bentuk file RDS dengan function `saveRDS()` agar model dapat langsung digunakan tanpa harus training dari awal.
+
+
+```{r}
+df_forest <- readRDS("model_rf.RDS")
+df_forest
+```
+Penjelasan dari output summary model random forest:
+
+1. 214 samples -> jumlah baris pada data train yang digunakan dalam pembuatan model
+2. 13 predictor -> jumlah variabel prediktor pada data train kita
+3. 2 classes -> banyaknya kelas target yang ada pada data kita
+4. Summary of sample sizes -> banyaknya sample size pada data train hasil k-fold cross validation
+5. mtry dan accuracy menunjukkan banyaknya mtry yang digunakan dan nilai accuracy dari model masing-masing mtry. accuracy ini dapat dijadikan acuan model mana yang paling baik berdasarkan mtry-nya.
+
+Bila dilihat dari summary model, dilakukan beberapa percobaan `mtry` (jumlah prediktor yang dapat digunakan untuk splitting node (1 prediktor bisa digunakan lebih dari 1 kali)). Di tiap repeats, akan dicoba mtry yang berbeda (pemilihan angka mtry secara random juga). Random forest akan secara otomatis memilih mtry yang menghasilkan metrics evaluasi (dalam kasus ini Accuracy) terbaik.
+
+Pada kasus ini model yang dipilih adalah dengan mtry = 2, yang memiliki akurasi tertinggi ketika diujikan ke data hasil boostrap sampling (bisa dianggap sebagai *data train* pada pembuatan decision tree pada random forest).
+
+## Out of Bag Error
+
+```{r}
+df_forest$finalModel
+```
+Penjelasan summary `df_forest$finalModel`:
+
+1. Number of trees: 500 -> random forest membuat sebanyak 500 tree
+2. No. of variables tried at each split: 2 -> mtry : 2
+3. OOB estimate of  error rate: 20.56% -> out-of-bag error dari out-of-bag sample (unseen data saat melakukan bootstrap sampling)
+4. Confusion matrix -> nilai confusion matrix untuk out-of-bag sample yang ada
+
+```{r}
+varImp(df_forest) %>% plot()
+```
+
+Untuk variabel/prediktor yang berperan penting dalam pembuatan random forest, ada oldpeak dan thalach, dapat dilihat berdasarkan peringkatnya.
+
+## Prediction 
+
+```{r}
+pred_df <- predict(df_forest, data_test, type="raw")
+```
+
+## Model Evaluation
+
+```{r}
+confusionMatrix(pred_df, data_test$target, positive="1")
+```
+
+### Receiver-Operating Curve (ROC)
+
+
+```{r}
+pred_test_rf <- predict(model_rf, data_test, type="prob")
+
+```
+
+
+```{r}
+# objek prediction
+pred_roc_rf <-  prediction(predictions = pred_test_rf[,"1"], # hanya mengambil peluang salah satu kelas (pada case ini yaitu democrat)
+           labels = data_test$target)
+```
+
+```{r}
+perf <- plot(performance(prediction.obj = pred_roc_rf, # memanggil nilai roc_prediction yang sudah dihitung sebelumnya
+            measure = "tpr", 
+            x.measure = "fpr"))
+abline(0,1, lty=2) # harus dijalankan bersamaan dengan code plot() di atas
+```
+
+
+### Area Under Curve (AUC)
+
+Selanjutnya mari kita mencoba untuk AUCnya.
+
+```{r}
+auc_pred <- performance(prediction.obj = pred_roc_rf,
+            measure = "auc")
+
+auc_pred@y.values # tanda @ untuk mengakases nilai/bagian dari object auc
+
+str(auc_pred)
+```
+
+# Kesimpulan
+
+Setelah melakukan implementasi data pada model dengan 3 pendekatan yaitu Naive Bayes, Decision Tree, dan Random Forest, maka dapat disimpulkan bahwa performa yang dihasilkan model berbeda-beda.
+
+Pada kasus ini, error yang kita ingin minimalisir adalah False Negative
+- False Negative : pasien diprediksi no disease, namun nyatanya dia terkena disease
+- False Positive : pasien diprediksi disease, namun nyatanya dia no disease
+
+Error yang ingin kita kurangi adalah FN/Recall (Sensitivity).
+
+Berdasarkan hal tersebut, mari kita bandingkan Recall (Sensitivity) pada ketiga model tersebut.
+
+model_naive = 0.8000 - Naive Bayes
+  AUC = 0.8666667
+  
+model_dt    = 0.6333 - Decision Tree
+  AUC = 0.7290323
+  
+model_rf    = 0.7667 - Random Forest
+  AUC = 0.9182796
+  
+```{r}
+confusionMatrix(pred_naive, data_test$target, positive = "1")
+confusionMatrix(pred_dt, data_test$target, positive = "1")
+confusionMatrix(pred_df, data_test$target, positive = "1")
+```
+
+  
+Berdasarkan hasil model diatas, dapat dilihat bahwa model dengan **Naive Bayes** lebih baik dalam melakukan prediksi pada dataset nantinya.
+
+
